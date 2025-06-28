@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
+import 'dart:io';
 import '../services/chat_service.dart';
 
 class UploadPromptCard extends StatelessWidget {
@@ -159,39 +160,77 @@ class UploadPromptCard extends StatelessWidget {
       );
 
       if (result != null && result.files.isNotEmpty) {
-        PlatformFile file = result.files.first;
+        PlatformFile platformFile = result.files.first;
+
+        // Check file size (10MB limit)
+        if (platformFile.size > 10 * 1024 * 1024) {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: const Row(
+                  children: [
+                    Icon(Icons.error, color: Colors.white),
+                    SizedBox(width: 8),
+                    Text('File size must be less than 10MB'),
+                  ],
+                ),
+                backgroundColor: Colors.red.shade600,
+              ),
+            );
+          }
+          return;
+        }
+
+        // Convert PlatformFile to File
+        File file = File(platformFile.path!);
 
         // Show loading indicator
         if (context.mounted) {
-          _showUploadingDialog(context, file.name);
+          _showUploadingDialog(context, platformFile.name);
         }
 
-        // TODO: Implement actual file upload to backend
-        // For now, simulate upload
-        await Future.delayed(const Duration(seconds: 2));
+        // Upload file using chat service
+        bool success = await chatService.uploadResume(file);
 
         // Close loading dialog
         if (context.mounted) {
           Navigator.of(context).pop();
 
-          // Show success message
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Row(
-                children: [
-                  const Icon(Icons.check_circle, color: Colors.white),
-                  const SizedBox(width: 8),
-                  Text('Resume "${file.name}" uploaded successfully!'),
-                ],
+          if (success) {
+            // Show success message
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Row(
+                  children: [
+                    const Icon(Icons.check_circle, color: Colors.white),
+                    const SizedBox(width: 8),
+                    Text(
+                        'Resume "${platformFile.name}" uploaded successfully!'),
+                  ],
+                ),
+                backgroundColor: Colors.green.shade600,
+                duration: const Duration(seconds: 3),
               ),
-              backgroundColor: Colors.green.shade600,
-              duration: const Duration(seconds: 3),
-            ),
-          );
+            );
 
-          // Send a message to indicate resume was uploaded
-          chatService.sendMessage(
-              'I have uploaded my resume. Please analyze it and provide feedback.');
+            // Send a message to indicate resume was uploaded
+            chatService.sendMessage(
+                'I have uploaded my resume. Please analyze it and provide feedback.');
+          } else {
+            // Error message will be shown by the chat service
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: const Row(
+                  children: [
+                    Icon(Icons.error, color: Colors.white),
+                    SizedBox(width: 8),
+                    Text('Failed to upload resume. Please try again.'),
+                  ],
+                ),
+                backgroundColor: Colors.red.shade600,
+              ),
+            );
+          }
         }
       }
     } catch (e) {
@@ -205,7 +244,7 @@ class UploadPromptCard extends StatelessWidget {
               children: [
                 const Icon(Icons.error, color: Colors.white),
                 const SizedBox(width: 8),
-                const Text('Failed to upload resume. Please try again.'),
+                Text('Failed to upload resume: ${e.toString()}'),
               ],
             ),
             backgroundColor: Colors.red.shade600,

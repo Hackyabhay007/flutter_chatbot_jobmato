@@ -3,13 +3,14 @@ import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'package:uuid/uuid.dart';
 import 'dart:convert';
 import 'dart:io';
+import 'package:http/http.dart' as http;
 import '../models/message.dart';
 import '../models/job.dart';
 import 'auth_service.dart';
 
 class ChatService extends ChangeNotifier {
   static const String baseUrl =
-      'http://localhost:5003'; // Change to your server URL
+      'http://localhost:5003'; // Local development server
 
   IO.Socket? _socket;
   final AuthService _authService;
@@ -499,12 +500,73 @@ class ChatService extends ChangeNotifier {
   // File upload method
   Future<bool> uploadResume(File file) async {
     try {
-      // TODO: Implement file upload using dio or http
-      // For now, return true as placeholder
-      debugPrint('📄 Uploading resume: ${file.path}');
-      return true;
+      debugPrint('📄 Starting resume upload: ${file.path}');
+
+      // Get authentication token
+      final token = _authService.token ?? AuthService.defaultToken;
+
+      // Create multipart request
+      var request =
+          http.MultipartRequest('POST', Uri.parse('$baseUrl/upload-resume'));
+
+      // Add headers
+      request.headers['Authorization'] = 'Bearer $token';
+
+      // Add form fields
+      request.fields['session_id'] = _sessionId ?? 'default';
+      request.fields['token'] = token;
+
+      // Add file
+      var multipartFile = await http.MultipartFile.fromPath(
+        'resume',
+        file.path,
+        filename: file.path.split('/').last,
+      );
+      request.files.add(multipartFile);
+
+      debugPrint('📤 Sending upload request to $baseUrl/upload-resume');
+      debugPrint('📋 Session ID: ${_sessionId ?? 'default'}');
+      debugPrint('📁 File: ${file.path.split('/').last}');
+
+      // Send request
+      var response = await request.send();
+      var responseBody = await response.stream.bytesToString();
+
+      debugPrint('📡 Upload response status: ${response.statusCode}');
+      debugPrint('📄 Upload response body: $responseBody');
+
+      if (response.statusCode == 200) {
+        var jsonResponse = json.decode(responseBody);
+        if (jsonResponse['success'] == true) {
+          debugPrint('✅ Resume uploaded successfully');
+
+          // Add success message to chat
+          final successMessage = Message(
+            id: const Uuid().v4(),
+            content: jsonResponse['message'] ??
+                'Resume uploaded successfully! I can now provide better job recommendations based on your profile.',
+            sender: MessageSender.assistant,
+            type: MessageType.resumeUpload,
+            timestamp: DateTime.now(),
+          );
+          _messages.add(successMessage);
+          notifyListeners();
+
+          return true;
+        } else {
+          debugPrint('❌ Upload failed: ${jsonResponse['error']}');
+          _addErrorMessage('Upload failed: ${jsonResponse['error']}');
+          return false;
+        }
+      } else {
+        debugPrint('❌ Upload failed with status: ${response.statusCode}');
+        _addErrorMessage(
+            'Upload failed: Server returned status ${response.statusCode}');
+        return false;
+      }
     } catch (e) {
       debugPrint('❌ Resume upload error: $e');
+      _addErrorMessage('Upload failed: ${e.toString()}');
       return false;
     }
   }

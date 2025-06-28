@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import '../models/message.dart';
 import '../models/job.dart';
 import '../services/chat_service.dart';
@@ -221,6 +222,127 @@ class MessageBubble extends StatelessWidget {
             ),
           );
         }
+
+      case MessageType.markdown:
+        // For markdown messages, use markdown rendering even during streaming
+        return Container(
+          width: double.infinity,
+          decoration: BoxDecoration(
+            color: isUser ? Colors.white.withOpacity(0.1) : Colors.grey.shade50,
+            borderRadius: BorderRadius.circular(12),
+            border: isUser ? null : Border.all(color: Colors.grey.shade200),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(12.0),
+                child: MarkdownBody(
+                  data: message.content,
+                  styleSheet: MarkdownStyleSheet(
+                    h1: TextStyle(
+                      color: textColor,
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                      height: 1.3,
+                    ),
+                    h2: TextStyle(
+                      color: textColor,
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      height: 1.3,
+                    ),
+                    h3: TextStyle(
+                      color: textColor,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                      height: 1.3,
+                    ),
+                    p: TextStyle(
+                      color: textColor,
+                      fontSize: 16,
+                      height: 1.5,
+                    ),
+                    strong: TextStyle(
+                      color: textColor,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    em: TextStyle(
+                      color: textColor,
+                      fontStyle: FontStyle.italic,
+                    ),
+                    listBullet: TextStyle(
+                      color: textColor,
+                      fontSize: 16,
+                    ),
+                    code: TextStyle(
+                      color: isUser ? Colors.white : AppTheme.primaryColor,
+                      backgroundColor: isUser
+                          ? Colors.white.withOpacity(0.2)
+                          : Colors.grey.shade200,
+                      fontSize: 14,
+                      fontFamily: 'monospace',
+                    ),
+                    codeblockDecoration: BoxDecoration(
+                      color: isUser
+                          ? Colors.white.withOpacity(0.1)
+                          : Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
+                    blockquote: TextStyle(
+                      color: textColor.withOpacity(0.8),
+                      fontSize: 16,
+                      fontStyle: FontStyle.italic,
+                    ),
+                    blockquoteDecoration: BoxDecoration(
+                      border: Border(
+                        left: BorderSide(
+                          color: AppTheme.primaryColor,
+                          width: 4,
+                        ),
+                      ),
+                    ),
+                  ),
+                  onTapLink: (text, href, title) {
+                    if (href != null) {
+                      launchUrl(Uri.parse(href));
+                    }
+                  },
+                ),
+              ),
+              // Show typing indicator for streaming README content
+              if (chatService?.isStreaming == true &&
+                  chatService?.currentStreamingMessage?.id == message.id)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8.0),
+                  child: Row(
+                    children: [
+                      SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            isUser ? Colors.white : AppTheme.primaryColor,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Generating response...',
+                        style: TextStyle(
+                          color: textColor.withOpacity(0.6),
+                          fontSize: 12,
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        );
 
       case MessageType.error:
         return Row(

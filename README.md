@@ -59,12 +59,12 @@ A beautiful Flutter chat application that integrates with the JobMato AI Assista
 
 3. **Configure backend URL**
    
-   Edit `lib/services/chat_service.dart` and update the `baseUrl`:
+   The app is configured to connect to the JobMato chatbot server:
    ```dart
-   static const String baseUrl = 'http://your-server-url:5003';
+   static const String baseUrl = 'https://chatbot-server.jobmato.com';
    ```
    
-   For local development:
+   For local development, you can change it in `lib/services/chat_service.dart`:
    ```dart
    static const String baseUrl = 'http://localhost:5003';  // For emulator
    static const String baseUrl = 'http://10.0.2.2:5003';  // For Android emulator

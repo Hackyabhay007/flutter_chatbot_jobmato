@@ -1,6 +1,14 @@
 import 'job.dart';
 
-enum MessageType { text, jobCard, resumeUpload, error, typing, uploadPrompt }
+enum MessageType {
+  text,
+  jobCard,
+  resumeUpload,
+  error,
+  typing,
+  uploadPrompt,
+  markdown
+}
 
 enum MessageSender { user, assistant }
 
@@ -61,6 +69,10 @@ class Message {
         return MessageType.resumeUpload;
       case 'upload_prompt':
         return MessageType.uploadPrompt;
+      case 'markdown':
+        return MessageType.markdown;
+      case 'readme': // Keep for backward compatibility
+        return MessageType.markdown;
       case 'error':
         return MessageType.error;
       default:
