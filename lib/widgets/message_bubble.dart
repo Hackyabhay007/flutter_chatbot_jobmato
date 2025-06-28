@@ -3,10 +3,10 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import '../models/message.dart';
-import '../models/job.dart';
 import '../services/chat_service.dart';
 import '../utils/app_theme.dart';
 import 'job_card.dart';
+import 'collapsible_job_card.dart';
 import 'upload_prompt_card.dart';
 import 'streaming_text.dart';
 
@@ -128,40 +128,64 @@ class MessageBubble extends StatelessWidget {
 
     switch (message.type) {
       case MessageType.jobCard:
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              message.content,
-              style: TextStyle(
-                color: textColor,
-                fontSize: 16,
-              ),
-            ),
-            if (message.jobs != null && message.jobs!.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              ...message.jobs!.map((job) => Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: JobCard(job: job),
-                  )),
-              if (message.hasMore && onLoadMore != null) ...[
-                const SizedBox(height: 8),
-                Center(
-                  child: ElevatedButton(
-                    onPressed: onLoadMore,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppTheme.primaryColor,
-                      foregroundColor: Colors.white,
-                    ),
-                    child: Text(
-                      'Load More Jobs (${_getNextPageRange()})',
-                    ),
+        if (message.jobs != null && message.jobs!.isNotEmpty) {
+          // Check if this should be collapsible (for chat history) or normal (for new messages)
+          // We'll use collapsible only if the message content suggests it's from history
+          // or if there are many jobs that would clutter the chat
+          bool shouldUseCollapsible = _shouldUseCollapsibleJobCard();
+
+          if (shouldUseCollapsible) {
+            return CollapsibleJobCard(
+              content: message.content,
+              jobs: message.jobs!,
+              hasMore: message.hasMore,
+              totalJobs: message.totalJobs,
+              onLoadMore: onLoadMore,
+              isUser: isUser,
+              textColor: textColor,
+            );
+          } else {
+            // Show normal job cards for new messages
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  message.content,
+                  style: TextStyle(
+                    color: textColor,
+                    fontSize: 16,
                   ),
                 ),
+                const SizedBox(height: 12),
+                ...message.jobs!.map((job) => Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: JobCard(job: job),
+                    )),
+                if (message.hasMore && onLoadMore != null) ...[
+                  const SizedBox(height: 8),
+                  Center(
+                    child: ElevatedButton(
+                      onPressed: onLoadMore,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.primaryColor,
+                        foregroundColor: Colors.white,
+                      ),
+                      child: const Text('Load More Jobs'),
+                    ),
+                  ),
+                ],
               ],
-            ],
-          ],
-        );
+            );
+          }
+        } else {
+          return Text(
+            message.content,
+            style: TextStyle(
+              color: textColor,
+              fontSize: 16,
+            ),
+          );
+        }
 
       case MessageType.resumeUpload:
         return Column(
@@ -402,17 +426,17 @@ class MessageBubble extends StatelessWidget {
     }
   }
 
-  String _getNextPageRange() {
-    if (message.currentPage == null || message.totalJobs == null) {
-      return '';
-    }
+  bool _shouldUseCollapsibleJobCard() {
+    // For now, let's show normal job cards for new messages
+    // and only use collapsible for loaded chat history
+    // We can detect loaded history by checking if chatService is in a loading state
+    // or if the message timestamp is significantly older
 
-    final nextPage = message.currentPage! + 1;
-    final nextPageStart = nextPage * 10 + 1;
-    final nextPageEnd = (nextPage + 1) * 10;
-    final actualEnd =
-        nextPageEnd > message.totalJobs! ? message.totalJobs! : nextPageEnd;
+    final now = DateTime.now();
+    final messageAge = now.difference(message.timestamp);
 
-    return '$nextPageStart-$actualEnd of ${message.totalJobs}';
+    // Use collapsible only if message is from chat history (older than 2 minutes)
+    // This assumes new messages arrive within 2 minutes of being sent
+    return messageAge.inMinutes > 2;
   }
 }

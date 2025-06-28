@@ -9,7 +9,7 @@ import '../models/job.dart';
 import 'auth_service.dart';
 
 class ChatService extends ChangeNotifier {
-  static const bool isProduction = true;
+  static const bool isProduction = false;
   static const String baseUrl = isProduction
       ? 'https://chatbot-server.jobmato.com'
       : 'http://localhost:5003'; // Local development server
@@ -117,6 +117,22 @@ class ChatService extends ChangeNotifier {
       debugPrint('📋 Session status: $data');
       if (data['connected'] == true) {
         _sessionId = data['sessionId'];
+        // Immediately fetch sessions when session status changes
+        Future.delayed(const Duration(milliseconds: 500), () {
+          fetchSessions();
+        });
+      }
+      notifyListeners();
+    });
+
+    _socket!.on('session_initialized', (data) {
+      debugPrint('🚀 Session initialized: $data');
+      if (data['sessionId'] != null) {
+        _sessionId = data['sessionId'];
+        // Fetch sessions after session initialization
+        Future.delayed(const Duration(milliseconds: 500), () {
+          fetchSessions();
+        });
       }
       notifyListeners();
     });
@@ -150,6 +166,7 @@ class ChatService extends ChangeNotifier {
       if (data['sessions'] != null) {
         _sessions.clear();
         _sessions.addAll(List<Map<String, dynamic>>.from(data['sessions']));
+        debugPrint('📋 Updated sessions list: ${_sessions.length} sessions');
         notifyListeners();
       }
     });
@@ -159,6 +176,10 @@ class ChatService extends ChangeNotifier {
       if (data['sessionId'] != null) {
         _sessionId = data['sessionId'];
         _loadChatHistory(data['messages'] ?? []);
+        // Refresh sessions to update active indicator
+        fetchSessions();
+        // Notify listeners to update UI with new session
+        notifyListeners();
       }
     });
 
@@ -197,6 +218,10 @@ class ChatService extends ChangeNotifier {
       if (data['sessionId'] != null) {
         _sessionId = data['sessionId'];
         _clearMessages();
+        // Fetch sessions after creating new chat
+        Future.delayed(const Duration(milliseconds: 500), () {
+          fetchSessions();
+        });
         notifyListeners();
       }
     });
@@ -372,17 +397,56 @@ class ChatService extends ChangeNotifier {
   }
 
   void _loadChatHistory(List<dynamic> messages) {
+    debugPrint('📜 Loading chat history: ${messages.length} messages');
     _clearMessages();
 
     for (var msgData in messages) {
-      final message = Message.fromJson(msgData);
-      _messages.add(message);
+      try {
+        final message = Message.fromJson(msgData);
+        _messages.add(message);
+
+        // If this is a job card message, update pagination state
+        if (message.type == MessageType.jobCard && message.metadata != null) {
+          // Don't update search query from history to avoid conflicts
+          // Just update pagination info if it's the most recent job search
+          if (_messages.length <= 2 ||
+              (_messages.isNotEmpty && _messages.last.id == message.id)) {
+            _hasMoreJobs = message.metadata!['hasMore'] ?? false;
+            _totalJobs = message.metadata!['total'] ??
+                message.metadata!['totalJobs'] ??
+                0;
+            _currentPage = message.metadata!['currentPage'] ??
+                message.metadata!['page'] ??
+                1;
+
+            // Only set search query if we don't have one
+            if (_currentSearchQuery.isEmpty) {
+              String? searchQuery = message.metadata!['searchQuery'] ??
+                  message.metadata!['originalQuery'] ??
+                  message.metadata!['query'];
+              if (searchQuery?.isNotEmpty == true) {
+                _currentSearchQuery = searchQuery!;
+              }
+            }
+          }
+        }
+
+        debugPrint(
+            '✅ Loaded message: ${message.sender.name} (${message.type.name}) - "${message.content.substring(0, message.content.length > 50 ? 50 : message.content.length)}..."');
+      } catch (e) {
+        debugPrint('❌ Failed to parse message: $e');
+        debugPrint('❌ Message data: $msgData');
+      }
     }
 
+    debugPrint('📋 Total messages loaded: ${_messages.length}');
+    debugPrint(
+        '📄 Job search state after history load: hasMore=$_hasMoreJobs, page=$_currentPage, total=$_totalJobs, query="$_currentSearchQuery"');
     notifyListeners();
   }
 
   void _clearMessages() {
+    debugPrint('🗑️ Clearing ${_messages.length} messages');
     _messages.clear();
     notifyListeners();
   }
@@ -451,8 +515,13 @@ class ChatService extends ChangeNotifier {
   }
 
   void loadSession(String sessionId) {
-    if (!_isConnected || !_isAuthenticated) return;
+    if (!_isConnected || !_isAuthenticated) {
+      debugPrint(
+          '❌ Cannot load session - connected: $_isConnected, authenticated: $_isAuthenticated');
+      return;
+    }
 
+    debugPrint('📂 Loading session: $sessionId');
     _socket!.emit('load_session', {'sessionId': sessionId});
   }
 

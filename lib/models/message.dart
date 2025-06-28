@@ -38,15 +38,17 @@ class Message {
   });
 
   factory Message.fromJson(Map<String, dynamic> json) {
+    // Handle both 'sender' and 'role' fields (backend uses 'role')
+    String senderField = json['sender'] ?? json['role'] ?? 'assistant';
+
     return Message(
       id: json['id'] ?? DateTime.now().millisecondsSinceEpoch.toString(),
       content: json['content'] ?? '',
-      sender: json['sender'] == 'user'
-          ? MessageSender.user
-          : MessageSender.assistant,
+      sender:
+          senderField == 'user' ? MessageSender.user : MessageSender.assistant,
       type: _parseMessageType(json['type']),
       timestamp: json['timestamp'] != null
-          ? DateTime.parse(json['timestamp'])
+          ? DateTime.parse(json['timestamp'].toString())
           : DateTime.now(),
       metadata: json['metadata'],
       jobs: json['metadata']?['jobs'] != null
@@ -75,6 +77,8 @@ class Message {
         return MessageType.markdown;
       case 'error':
         return MessageType.error;
+      case 'plain_text':
+        return MessageType.text;
       default:
         return MessageType.text;
     }

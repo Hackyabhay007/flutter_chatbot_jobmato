@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
@@ -121,6 +122,8 @@ class SessionSidebar extends StatelessWidget {
                       isActive: isActive,
                       onTap: () {
                         if (!isActive) {
+                          debugPrint(
+                              '🎯 Session tapped: ${session['sessionId']} (${session['title']})');
                           chatService.loadSession(session['sessionId']);
                         }
                         Navigator.of(context).pop(); // Close drawer
