@@ -9,8 +9,10 @@ import '../models/job.dart';
 import 'auth_service.dart';
 
 class ChatService extends ChangeNotifier {
-  static const String baseUrl =
-      'http://localhost:5003'; // Local development server
+  static const bool isProduction = true;
+  static const String baseUrl = isProduction
+      ? 'https://chatbot-server.jobmato.com'
+      : 'http://localhost:5003'; // Local development server
 
   IO.Socket? _socket;
   final AuthService _authService;
