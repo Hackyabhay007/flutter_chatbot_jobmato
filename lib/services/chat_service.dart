@@ -430,4 +430,18 @@ class ChatService extends ChangeNotifier {
       _socket!.emit('ping');
     }
   }
+
+  // Show upload prompt
+  void showUploadPrompt() {
+    final uploadPromptMessage = Message(
+      id: const Uuid().v4(),
+      content:
+          'Upload your resume to get personalized job recommendations and career advice.',
+      sender: MessageSender.assistant,
+      type: MessageType.uploadPrompt,
+      timestamp: DateTime.now(),
+    );
+    _messages.add(uploadPromptMessage);
+    notifyListeners();
+  }
 }

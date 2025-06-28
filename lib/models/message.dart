@@ -1,6 +1,6 @@
 import 'job.dart';
 
-enum MessageType { text, jobCard, resumeUpload, error, typing }
+enum MessageType { text, jobCard, resumeUpload, error, typing, uploadPrompt }
 
 enum MessageSender { user, assistant }
 
@@ -33,22 +33,19 @@ class Message {
     return Message(
       id: json['id'] ?? DateTime.now().millisecondsSinceEpoch.toString(),
       content: json['content'] ?? '',
-      sender:
-          json['sender'] == 'user'
-              ? MessageSender.user
-              : MessageSender.assistant,
+      sender: json['sender'] == 'user'
+          ? MessageSender.user
+          : MessageSender.assistant,
       type: _parseMessageType(json['type']),
-      timestamp:
-          json['timestamp'] != null
-              ? DateTime.parse(json['timestamp'])
-              : DateTime.now(),
+      timestamp: json['timestamp'] != null
+          ? DateTime.parse(json['timestamp'])
+          : DateTime.now(),
       metadata: json['metadata'],
-      jobs:
-          json['metadata']?['jobs'] != null
-              ? (json['metadata']['jobs'] as List)
-                  .map((job) => Job.fromJson(job))
-                  .toList()
-              : null,
+      jobs: json['metadata']?['jobs'] != null
+          ? (json['metadata']['jobs'] as List)
+              .map((job) => Job.fromJson(job))
+              .toList()
+          : null,
       hasMore: json['metadata']?['hasMore'] ?? false,
       totalJobs: json['metadata']?['total'] ?? json['metadata']?['totalJobs'],
       currentPage:
@@ -62,6 +59,8 @@ class Message {
         return MessageType.jobCard;
       case 'resume_upload_success':
         return MessageType.resumeUpload;
+      case 'upload_prompt':
+        return MessageType.uploadPrompt;
       case 'error':
         return MessageType.error;
       default:

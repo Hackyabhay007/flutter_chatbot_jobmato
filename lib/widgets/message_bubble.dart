@@ -3,21 +3,30 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../models/message.dart';
 import '../models/job.dart';
+import '../services/chat_service.dart';
 import '../utils/app_theme.dart';
 import 'job_card.dart';
+import 'upload_prompt_card.dart';
 
 class MessageBubble extends StatelessWidget {
   final Message message;
   final VoidCallback? onLoadMore;
+  final ChatService? chatService;
 
   const MessageBubble({
     super.key,
     required this.message,
     this.onLoadMore,
+    this.chatService,
   });
 
   @override
   Widget build(BuildContext context) {
+    // Special handling for upload prompt - display as standalone card
+    if (message.type == MessageType.uploadPrompt && chatService != null) {
+      return UploadPromptCard(chatService: chatService!);
+    }
+
     final isUser = message.sender == MessageSender.user;
 
     return Container(
@@ -197,6 +206,20 @@ class MessageBubble extends StatelessWidget {
             ],
           ],
         );
+
+      case MessageType.uploadPrompt:
+        // For upload prompts, we return the special card instead of regular bubble
+        if (chatService != null) {
+          return UploadPromptCard(chatService: chatService!);
+        } else {
+          return Text(
+            message.content,
+            style: TextStyle(
+              color: textColor,
+              fontSize: 16,
+            ),
+          );
+        }
 
       case MessageType.error:
         return Row(

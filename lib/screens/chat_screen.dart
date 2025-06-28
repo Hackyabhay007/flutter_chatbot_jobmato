@@ -160,6 +160,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     final message = chatService.messages[index];
                     return MessageBubble(
                       message: message,
+                      chatService: chatService,
                       onLoadMore: chatService.hasMoreJobs
                           ? () => chatService.loadMoreJobs()
                           : null,
@@ -288,6 +289,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 _buildQuickActionChip('Resume analysis', Icons.description),
                 _buildQuickActionChip('Career advice', Icons.lightbulb),
                 _buildQuickActionChip('Project ideas', Icons.code),
+                _buildUploadPromptChip(),
               ],
             ),
           ],
@@ -306,6 +308,22 @@ class _ChatScreenState extends State<ChatScreen> {
       },
       backgroundColor: AppTheme.primaryColor.withOpacity(0.1),
       labelStyle: const TextStyle(color: AppTheme.primaryColor),
+    );
+  }
+
+  Widget _buildUploadPromptChip() {
+    return Consumer<ChatService>(
+      builder: (context, chatService, child) {
+        return ActionChip(
+          avatar: const Icon(Icons.upload_file, size: 18),
+          label: const Text('Upload Resume'),
+          onPressed: () {
+            chatService.showUploadPrompt();
+          },
+          backgroundColor: AppTheme.accentColor.withOpacity(0.1),
+          labelStyle: const TextStyle(color: AppTheme.accentColor),
+        );
+      },
     );
   }
 
