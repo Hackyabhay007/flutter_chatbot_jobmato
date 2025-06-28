@@ -186,17 +186,6 @@ class _ChatScreenState extends State<ChatScreen> {
             child: SafeArea(
               child: Row(
                 children: [
-                  // File Upload Button
-                  IconButton(
-                    onPressed: _showUploadOptions,
-                    icon: const Icon(Icons.attach_file),
-                    style: IconButton.styleFrom(
-                      backgroundColor: AppTheme.accentColor,
-                      foregroundColor: Colors.white,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-
                   // Message Input
                   Expanded(
                     child: TextField(
