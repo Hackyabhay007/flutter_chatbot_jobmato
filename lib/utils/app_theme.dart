@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 
 class AppTheme {
-  // Colors
-  static const Color primaryColor = Color(0xFF4F46E5);
-  static const Color secondaryColor = Color(0xFF7C3AED);
-  static const Color accentColor = Color(0xFF10B981);
-  static const Color backgroundColor = Color(0xFFF8FAFC);
+  // Colors - Blue Light, White, and Black
+  static const Color primaryColor = Color(0xFF3B82F6); // Blue
+  static const Color secondaryColor = Color(0xFF60A5FA); // Light Blue
+  static const Color accentColor = Color(0xFF0EA5E9); // Sky Blue
+  static const Color backgroundColor = Colors.white;
   static const Color surfaceColor = Colors.white;
   static const Color errorColor = Color(0xFFEF4444);
 
@@ -17,7 +17,7 @@ class AppTheme {
   );
 
   static const LinearGradient accentGradient = LinearGradient(
-    colors: [accentColor, Color(0xFF059669)],
+    colors: [accentColor, Color(0xFF38BDF8)],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
@@ -70,20 +70,20 @@ class AppTheme {
       headlineLarge: TextStyle(
         fontSize: 28,
         fontWeight: FontWeight.bold,
-        color: Color(0xFF374151),
+        color: Colors.black,
       ),
       headlineMedium: TextStyle(
         fontSize: 24,
         fontWeight: FontWeight.w600,
-        color: Color(0xFF374151),
+        color: Colors.black,
       ),
       titleLarge: TextStyle(
         fontSize: 20,
         fontWeight: FontWeight.w600,
-        color: Color(0xFF374151),
+        color: Colors.black,
       ),
-      bodyLarge: TextStyle(fontSize: 16, color: Color(0xFF374151)),
-      bodyMedium: TextStyle(fontSize: 14, color: Color(0xFF6B7280)),
+      bodyLarge: TextStyle(fontSize: 16, color: Colors.black),
+      bodyMedium: TextStyle(fontSize: 14, color: Color(0xFF4B5563)),
     ),
   );
 

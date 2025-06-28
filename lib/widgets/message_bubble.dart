@@ -7,6 +7,7 @@ import '../services/chat_service.dart';
 import '../utils/app_theme.dart';
 import 'job_card.dart';
 import 'upload_prompt_card.dart';
+import 'streaming_text.dart';
 
 class MessageBubble extends StatelessWidget {
   final Message message;
@@ -243,13 +244,16 @@ class MessageBubble extends StatelessWidget {
         );
 
       default:
-        return Text(
-          _formatTextContent(message.content),
+        return StreamingText(
+          text: _formatTextContent(message.content),
           style: TextStyle(
             color: textColor,
             fontSize: 16,
             height: 1.4,
           ),
+          isStreaming: chatService?.isStreaming == true &&
+              chatService?.currentStreamingMessage?.id == message.id,
+          wordDelay: const Duration(milliseconds: 80),
         );
     }
   }

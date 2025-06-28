@@ -18,8 +18,10 @@ class ChatService extends ChangeNotifier {
   bool _isConnected = false;
   bool _isAuthenticated = false;
   bool _isTyping = false;
+  bool _isStreaming = false;
   String? _sessionId;
   String? _userId;
+  Message? _currentStreamingMessage;
 
   // Messages and pagination
   final List<Message> _messages = [];
@@ -36,8 +38,10 @@ class ChatService extends ChangeNotifier {
   bool get isConnected => _isConnected;
   bool get isAuthenticated => _isAuthenticated;
   bool get isTyping => _isTyping;
+  bool get isStreaming => _isStreaming;
   String? get sessionId => _sessionId;
   String? get userId => _userId;
+  Message? get currentStreamingMessage => _currentStreamingMessage;
   List<Message> get messages => List.unmodifiable(_messages);
   String get currentSearchQuery => _currentSearchQuery;
   bool get hasMoreJobs => _hasMoreJobs;
@@ -197,7 +201,14 @@ class ChatService extends ChangeNotifier {
 
   void _handleReceivedMessage(Map<String, dynamic> data) {
     final message = Message.fromJson(data);
-    _messages.add(message);
+
+    // Start streaming simulation for assistant messages
+    if (message.sender == MessageSender.assistant) {
+      _simulateStreamingMessage(message);
+    } else {
+      _messages.add(message);
+      notifyListeners();
+    }
 
     // Handle job search pagination
     if (message.type == MessageType.jobCard && message.metadata != null) {
@@ -244,7 +255,95 @@ class ChatService extends ChangeNotifier {
     }
 
     _isTyping = false;
+  }
+
+  void _simulateStreamingMessage(Message originalMessage) {
+    // Create initial empty streaming message with unique ID
+    final streamingMessage = originalMessage.copyWith(
+      content: '',
+      id: 'streaming_${DateTime.now().millisecondsSinceEpoch}',
+    );
+
+    _messages.add(streamingMessage);
+    _isStreaming = true;
+    _currentStreamingMessage = streamingMessage;
     notifyListeners();
+
+    debugPrint('🌊 Starting streaming for message: ${streamingMessage.id}');
+
+    // Simulate word-by-word streaming
+    _animateMessageContent(originalMessage.content, streamingMessage);
+  }
+
+  void _animateMessageContent(String fullContent, Message message) async {
+    final words = fullContent.split(' ');
+    String currentContent = '';
+
+    for (int i = 0; i < words.length; i++) {
+      // Check if streaming should continue
+      if (!_isStreaming || _currentStreamingMessage?.id != message.id) {
+        debugPrint('🛑 Streaming stopped or message changed');
+        break;
+      }
+
+      currentContent += words[i];
+      if (i < words.length - 1) currentContent += ' ';
+
+      // Update the message content
+      int index = -1;
+      for (int j = 0; j < _messages.length; j++) {
+        if (_messages[j].id == message.id) {
+          index = j;
+          break;
+        }
+      }
+
+      if (index != -1) {
+        try {
+          final updatedMessage = message.copyWith(content: currentContent);
+          _messages[index] = updatedMessage;
+          // Update the reference to the current message
+          if (_currentStreamingMessage?.id == message.id) {
+            _currentStreamingMessage = updatedMessage;
+          }
+          notifyListeners();
+          debugPrint(
+              '📝 Streaming progress: ${i + 1}/${words.length} words - "${words[i]}"');
+        } catch (e) {
+          debugPrint('❌ Error updating streaming message: $e');
+          break;
+        }
+      } else {
+        debugPrint(
+            '❌ Message not found in list, stopping streaming. Looking for ID: ${message.id}');
+        debugPrint(
+            '📋 Current messages: ${_messages.map((m) => m.id).toList()}');
+        break;
+      }
+
+      // Delay between words (60ms for faster streaming)
+      await Future.delayed(const Duration(milliseconds: 60));
+    }
+
+    // Streaming complete - ensure final content is set
+    if (_isStreaming && _currentStreamingMessage?.id == message.id) {
+      int index = -1;
+      for (int j = 0; j < _messages.length; j++) {
+        if (_messages[j].id == message.id) {
+          index = j;
+          break;
+        }
+      }
+
+      if (index != -1) {
+        _messages[index] = message.copyWith(content: fullContent);
+      }
+
+      _isStreaming = false;
+      _currentStreamingMessage = null;
+      notifyListeners();
+      debugPrint('✅ Streaming completed for message: ${message.id}');
+    }
   }
 
   void _addErrorMessage(String errorText) {
