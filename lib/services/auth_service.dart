@@ -8,7 +8,7 @@ class AuthService extends ChangeNotifier {
 
   // Default JWT token for demo purposes (replace with actual auth flow)
   static const String defaultToken =
-      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY4NDcxMDBlYTQxN2IwMGEyMGYzZjA1MSIsImVtYWlsIjoiaGFja3lhYmhheUBnbWFpbC5jb20iLCJpYXQiOjE3NTEwMjgyNzMsImV4cCI6MTc1MTYzMzA3M30.E_x9zxiRGuAXR0thdE6qiEdl87VuzHOtucEz6jERDFA';
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY4Njg0OWU4NWU4NmQ5NTZhZjQxODdiZSIsImVtYWlsIjoidWJhaWQyNzUxQGdtYWlsLmNvbSIsImlhdCI6MTc1MTk3MjgyNCwiZXhwIjoxNzUyNTc3NjI0fQ.w6qpzfNlnsJZxugwxlb6S5P8VYayfmoRQ2Phc5_Pxa0';
 
   String? _token;
   String? _userId;

@@ -1,5 +1,5 @@
 import 'package:flutter/foundation.dart';
-import 'package:socket_io_client/socket_io_client.dart' as IO;
+import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:uuid/uuid.dart';
 import 'dart:convert';
 import 'dart:io';
@@ -12,9 +12,9 @@ class ChatService extends ChangeNotifier {
   static const bool isProduction = false;
   static const String baseUrl = isProduction
       ? 'https://chatbot-server.jobmato.com'
-      : 'http://localhost:5003'; // Local development server
+      : 'http://127.0.0.1:8000'; // Local development server
 
-  IO.Socket? _socket;
+  WebSocketChannel? _channel;
   final AuthService _authService;
 
   // State variables
@@ -37,6 +37,9 @@ class ChatService extends ChangeNotifier {
   // Sessions
   final List<Map<String, dynamic>> _sessions = [];
 
+  // Streaming message tracking
+  final Map<String, String> _streamingMessageIds = {};
+
   // Getters
   bool get isConnected => _isConnected;
   bool get isAuthenticated => _isAuthenticated;
@@ -55,345 +58,197 @@ class ChatService extends ChangeNotifier {
   ChatService(this._authService) {
     // Delay socket initialization to ensure auth service is ready
     Future.delayed(const Duration(milliseconds: 100), () {
-      _initializeSocket();
+      _initializeWebSocket();
     });
   }
 
-  void _initializeSocket() {
+  void _initializeWebSocket() {
     try {
       final token = _authService.token;
       debugPrint(
-          '🔗 Initializing socket with token: ${token?.substring(0, 20)}...');
+          '🔗 Initializing WebSocket with token: ${token?.substring(0, 20)}...');
 
-      _socket = IO.io(baseUrl, <String, dynamic>{
-        'transports': ['websocket', 'polling'],
-        'timeout': 60000,
-        'query': {'token': token ?? AuthService.defaultToken},
-      });
+      // Create WebSocket connection
+      final wsUrl = Uri.parse('ws://127.0.0.1:8000/ws/chat');
+      _channel = WebSocketChannel.connect(wsUrl);
 
-      _setupSocketListeners();
-      _socket!.connect();
+      _setupWebSocketListeners();
     } catch (e) {
-      debugPrint('Socket initialization error: $e');
-    }
-  }
-
-  void _setupSocketListeners() {
-    // Connection events
-    _socket!.on('connect', (_) {
-      debugPrint('🔌 Connected to server');
-      _isConnected = true;
-      notifyListeners();
-    });
-
-    _socket!.on('disconnect', (_) {
-      debugPrint('🔌 Disconnected from server');
+      debugPrint('WebSocket initialization error: $e');
       _isConnected = false;
-      _isAuthenticated = false;
       notifyListeners();
-    });
+    }
+  }
 
-    // Authentication events
-    _socket!.on('auth_status', (data) {
-      debugPrint('🔐 Authentication status: $data');
-      if (data['authenticated'] == true) {
-        _isAuthenticated = true;
-        _userId = data['userId'];
-        _initializeChat();
-      } else {
+  void _setupWebSocketListeners() {
+    _channel!.stream.listen(
+      (data) {
+        _handleWebSocketMessage(data);
+      },
+      onError: (error) {
+        debugPrint('❌ WebSocket error: $error');
+        _isConnected = false;
         _isAuthenticated = false;
-      }
-      notifyListeners();
-    });
-
-    _socket!.on('auth_error', (data) {
-      debugPrint('❌ Authentication error: $data');
-      _isAuthenticated = false;
-      notifyListeners();
-    });
-
-    // Session events
-    _socket!.on('session_status', (data) {
-      debugPrint('📋 Session status: $data');
-      if (data['connected'] == true) {
-        _sessionId = data['sessionId'];
-        // Immediately fetch sessions when session status changes
-        Future.delayed(const Duration(milliseconds: 500), () {
-          fetchSessions();
-        });
-      }
-      notifyListeners();
-    });
-
-    _socket!.on('session_initialized', (data) {
-      debugPrint('🚀 Session initialized: $data');
-      if (data['sessionId'] != null) {
-        _sessionId = data['sessionId'];
-        // Fetch sessions after session initialization
-        Future.delayed(const Duration(milliseconds: 500), () {
-          fetchSessions();
-        });
-      }
-      notifyListeners();
-    });
-
-    _socket!.on('init_response', (data) {
-      debugPrint('🚀 Chat initialized: $data');
-    });
-
-    // Message events
-    _socket!.on('receive_message', (data) {
-      debugPrint('💬 Received message: $data');
-      _handleReceivedMessage(data);
-    });
-
-    // Typing events
-    _socket!.on('typing_status', (data) {
-      debugPrint('📝 Typing status: $data');
-      _isTyping = data['isTyping'] ?? false;
-      notifyListeners();
-    });
-
-    // Error events
-    _socket!.on('error', (data) {
-      debugPrint('❌ Socket error: $data');
-      _addErrorMessage('Sorry, I encountered an error: ${data['message']}');
-    });
-
-    // Session management events
-    _socket!.on('user_sessions', (data) {
-      debugPrint('📋 User sessions received: $data');
-      if (data['sessions'] != null) {
-        _sessions.clear();
-        _sessions.addAll(List<Map<String, dynamic>>.from(data['sessions']));
-        debugPrint('📋 Updated sessions list: ${_sessions.length} sessions');
         notifyListeners();
-      }
-    });
-
-    _socket!.on('session_loaded', (data) {
-      debugPrint('📂 Session loaded: $data');
-      if (data['sessionId'] != null) {
-        _sessionId = data['sessionId'];
-        _loadChatHistory(data['messages'] ?? []);
-        // Refresh sessions to update active indicator
-        fetchSessions();
-        // Notify listeners to update UI with new session
-        notifyListeners();
-      }
-    });
-
-    _socket!.on('session_deleted', (data) {
-      debugPrint('🗑️ Session deleted: $data');
-      if (data['success'] == true) {
-        if (data['sessionId'] == _sessionId) {
-          _clearMessages();
-          _sessionId = null;
-        }
-        fetchSessions();
-      }
-    });
-
-    _socket!.on('session_title_updated', (data) {
-      debugPrint('✏️ Session title updated: $data');
-      if (data['success'] == true) {
-        fetchSessions();
-      }
-    });
-
-    _socket!.on('chat_history', (data) {
-      debugPrint('📜 Chat history: $data');
-      if (data['messages'] != null) {
-        _loadChatHistory(data['messages']);
-      }
-    });
-
-    _socket!.on('session_cleared', (data) {
-      debugPrint('🗑️ Session cleared: $data');
-      _clearMessages();
-    });
-
-    _socket!.on('new_chat_created', (data) {
-      debugPrint('🆕 New chat created: $data');
-      if (data['sessionId'] != null) {
-        _sessionId = data['sessionId'];
-        _clearMessages();
-        // Fetch sessions after creating new chat
-        Future.delayed(const Duration(milliseconds: 500), () {
-          fetchSessions();
+        // Attempt to reconnect after a delay
+        Future.delayed(const Duration(seconds: 5), () {
+          if (!_isConnected) {
+            _initializeWebSocket();
+          }
         });
+      },
+      onDone: () {
+        debugPrint('🔌 WebSocket connection closed');
+        _isConnected = false;
+        _isAuthenticated = false;
         notifyListeners();
-      }
-    });
+        // Attempt to reconnect after a delay
+        Future.delayed(const Duration(seconds: 5), () {
+          if (!_isConnected) {
+            _initializeWebSocket();
+          }
+        });
+      },
+    );
+
+    // Send authentication message once connected
+    _sendAuthMessage();
   }
 
-  void _handleReceivedMessage(Map<String, dynamic> data) {
-    final message = Message.fromJson(data);
+  void _sendAuthMessage() {
+    final token = _authService.token ?? AuthService.defaultToken;
+    final authMessage = {
+      "event": "connect",
+      "data": {
+        "token": token,
+      }
+    };
+    _sendMessage(authMessage);
+  }
 
-    // Start streaming simulation for assistant messages
-    if (message.sender == MessageSender.assistant) {
-      _simulateStreamingMessage(message);
+  void _handleWebSocketMessage(dynamic data) {
+    try {
+      String messageStr;
+      if (data is String) {
+        messageStr = data;
+      } else {
+        messageStr = json.encode(data);
+      }
+
+      final message = json.decode(messageStr);
+      final event = message['event'];
+      final payload = message['data'] ?? {};
+
+      debugPrint('📨 Received WebSocket message: $event');
+
+      switch (event) {
+        case 'auth_status':
+          _handleAuthStatus(payload);
+          break;
+        case 'session_status':
+          _handleSessionStatus(payload);
+          break;
+        case 'receive_message':
+          _handleReceivedMessage(payload);
+          break;
+        case 'typing_status':
+          _handleTypingStatus(payload);
+          break;
+        case 'user_sessions':
+          _handleUserSessions(payload);
+          break;
+        case 'session_loaded':
+          _handleSessionLoaded(payload);
+          break;
+        case 'session_deleted':
+          _handleSessionDeleted(payload);
+          break;
+        case 'session_title_updated':
+          _handleSessionTitleUpdated(payload);
+          break;
+        case 'error':
+          _handleError(payload);
+          break;
+        default:
+          debugPrint('📨 Unknown event: $event');
+      }
+    } catch (e) {
+      debugPrint('❌ Error parsing WebSocket message: $e');
+      debugPrint('❌ Raw message: $data');
+    }
+  }
+
+  void _handleAuthStatus(Map<String, dynamic> payload) {
+    debugPrint('🔐 Authentication status: $payload');
+    if (payload['status'] == 'success') {
+      _isAuthenticated = true;
+      _isConnected = true;
+      _userId = payload['username'];
+      debugPrint('✅ Authentication successful');
     } else {
-      _messages.add(message);
-      notifyListeners();
+      _isAuthenticated = false;
+      debugPrint('❌ Authentication failed: ${payload['message']}');
     }
-
-    // Handle job search pagination
-    if (message.type == MessageType.jobCard && message.metadata != null) {
-      // Try multiple possible field names for the search query
-      String? newSearchQuery = message.metadata!['searchQuery'] ??
-          message.metadata!['originalQuery'] ??
-          message.metadata!['query'] ??
-          message.metadata!['searchParams']?['query'] ??
-          '';
-
-      // If no search query found in metadata, try potential search query first, then last user message
-      if (newSearchQuery?.isEmpty == true) {
-        if (_potentialSearchQuery.isNotEmpty) {
-          newSearchQuery = _potentialSearchQuery;
-          debugPrint('🔍 Using potential search query: $newSearchQuery');
-        } else if (_messages.length >= 2) {
-          // Look for the last user message (the one before this response)
-          for (int i = _messages.length - 2; i >= 0; i--) {
-            if (_messages[i].sender == MessageSender.user) {
-              newSearchQuery = _messages[i].content;
-              break;
-            }
-          }
-        }
-      }
-
-      if (newSearchQuery?.isNotEmpty == true) {
-        _currentSearchQuery = newSearchQuery!;
-      }
-
-      _hasMoreJobs = message.metadata!['hasMore'] ?? false;
-      _totalJobs =
-          message.metadata!['total'] ?? message.metadata!['totalJobs'] ?? 0;
-
-      if (message.metadata!['isFollowUp'] == true) {
-        _currentPage =
-            message.metadata!['currentPage'] ?? message.metadata!['page'] ?? 1;
-      } else {
-        _currentPage = 1;
-      }
-
-      debugPrint(
-          'Job search state: hasMore=$_hasMoreJobs, page=$_currentPage, total=$_totalJobs, query="$_currentSearchQuery"');
-    }
-
-    _isTyping = false;
-  }
-
-  void _simulateStreamingMessage(Message originalMessage) {
-    // Create initial empty streaming message with unique ID
-    final streamingMessage = originalMessage.copyWith(
-      content: '',
-      id: 'streaming_${DateTime.now().millisecondsSinceEpoch}',
-    );
-
-    _messages.add(streamingMessage);
-    _isStreaming = true;
-    _currentStreamingMessage = streamingMessage;
-    notifyListeners();
-
-    debugPrint('🌊 Starting streaming for message: ${streamingMessage.id}');
-
-    // Simulate word-by-word streaming
-    _animateMessageContent(originalMessage.content, streamingMessage);
-  }
-
-  void _animateMessageContent(String fullContent, Message message) async {
-    final words = fullContent.split(' ');
-    String currentContent = '';
-
-    for (int i = 0; i < words.length; i++) {
-      // Check if streaming should continue
-      if (!_isStreaming || _currentStreamingMessage?.id != message.id) {
-        debugPrint('🛑 Streaming stopped or message changed');
-        break;
-      }
-
-      currentContent += words[i];
-      if (i < words.length - 1) currentContent += ' ';
-
-      // Update the message content
-      int index = -1;
-      for (int j = 0; j < _messages.length; j++) {
-        if (_messages[j].id == message.id) {
-          index = j;
-          break;
-        }
-      }
-
-      if (index != -1) {
-        try {
-          final updatedMessage = message.copyWith(content: currentContent);
-          _messages[index] = updatedMessage;
-          // Update the reference to the current message
-          if (_currentStreamingMessage?.id == message.id) {
-            _currentStreamingMessage = updatedMessage;
-          }
-          notifyListeners();
-          debugPrint(
-              '📝 Streaming progress: ${i + 1}/${words.length} words - "${words[i]}"');
-        } catch (e) {
-          debugPrint('❌ Error updating streaming message: $e');
-          break;
-        }
-      } else {
-        debugPrint(
-            '❌ Message not found in list, stopping streaming. Looking for ID: ${message.id}');
-        debugPrint(
-            '📋 Current messages: ${_messages.map((m) => m.id).toList()}');
-        break;
-      }
-
-      // Delay between words (60ms for faster streaming)
-      await Future.delayed(const Duration(milliseconds: 60));
-    }
-
-    // Streaming complete - ensure final content is set
-    if (_isStreaming && _currentStreamingMessage?.id == message.id) {
-      int index = -1;
-      for (int j = 0; j < _messages.length; j++) {
-        if (_messages[j].id == message.id) {
-          index = j;
-          break;
-        }
-      }
-
-      if (index != -1) {
-        _messages[index] = message.copyWith(content: fullContent);
-      }
-
-      _isStreaming = false;
-      _currentStreamingMessage = null;
-      notifyListeners();
-      debugPrint('✅ Streaming completed for message: ${message.id}');
-    }
-  }
-
-  void _addErrorMessage(String errorText) {
-    final message = Message(
-      id: const Uuid().v4(),
-      content: errorText,
-      sender: MessageSender.assistant,
-      type: MessageType.error,
-      timestamp: DateTime.now(),
-    );
-    _messages.add(message);
-    _isTyping = false;
     notifyListeners();
   }
 
-  void _initializeChat() {
-    _socket!.emit('init_chat', {'sessionId': _sessionId});
+  void _handleSessionStatus(Map<String, dynamic> payload) {
+    debugPrint('📋 Session status: $payload');
+    if (payload['session_id'] != null) {
+      _sessionId = payload['session_id'];
+    }
+    notifyListeners();
+  }
 
-    // Fetch sessions after a short delay
-    Future.delayed(const Duration(milliseconds: 500), () {
+  void _handleTypingStatus(Map<String, dynamic> payload) {
+    debugPrint('📝 Typing status: $payload');
+    _isTyping = payload['isTyping'] ?? false;
+    notifyListeners();
+  }
+
+  void _handleError(Map<String, dynamic> payload) {
+    debugPrint('❌ Server error: $payload');
+    _addErrorMessage('Sorry, I encountered an error: ${payload['message']}');
+  }
+
+  void _handleUserSessions(Map<String, dynamic> payload) {
+    debugPrint('📋 User sessions received: $payload');
+    if (payload['sessions'] != null) {
+      _sessions.clear();
+      _sessions.addAll(List<Map<String, dynamic>>.from(payload['sessions']));
+      debugPrint('📋 Updated sessions list: ${_sessions.length} sessions');
+      notifyListeners();
+    }
+  }
+
+  void _handleSessionLoaded(Map<String, dynamic> payload) {
+    debugPrint('📂 Session loaded: $payload');
+    if (payload['sessionId'] != null) {
+      _sessionId = payload['sessionId'];
+      _loadChatHistory(payload['messages'] ?? []);
+      // Refresh sessions to update active indicator
       fetchSessions();
-    });
+      // Notify listeners to update UI with new session
+      notifyListeners();
+    }
+  }
+
+  void _handleSessionDeleted(Map<String, dynamic> payload) {
+    debugPrint('🗑️ Session deleted: $payload');
+    if (payload['success'] == true) {
+      if (payload['sessionId'] == _sessionId) {
+        _clearMessages();
+        _sessionId = null;
+      }
+      fetchSessions();
+    }
+  }
+
+  void _handleSessionTitleUpdated(Map<String, dynamic> payload) {
+    debugPrint('✏️ Session title updated: $payload');
+    if (payload['success'] == true) {
+      fetchSessions();
+    }
   }
 
   void _loadChatHistory(List<dynamic> messages) {
@@ -445,10 +300,132 @@ class ChatService extends ChangeNotifier {
     notifyListeners();
   }
 
-  void _clearMessages() {
-    debugPrint('🗑️ Clearing ${_messages.length} messages');
-    _messages.clear();
+  void _handleReceivedMessage(Map<String, dynamic> data) {
+    debugPrint('💬 Received message: $data');
+    final message = Message.fromJson(data);
+    final isPartial = data['metadata']?['partial'] == true;
+
+    // Handle real streaming from backend
+    if (message.sender == MessageSender.assistant && isPartial) {
+      _handleStreamingMessage(message);
+    } else if (message.sender == MessageSender.assistant && !isPartial) {
+      // Final message - complete the streaming
+      _completeStreamingMessage(message);
+    } else {
+      // User message or non-streaming message
+      _messages.add(message);
+      notifyListeners();
+    }
+
+    // Handle job search pagination
+    if (message.type == MessageType.jobCard && message.metadata != null) {
+      // Try multiple possible field names for the search query
+      String? newSearchQuery = message.metadata!['searchQuery'] ??
+          message.metadata!['originalQuery'] ??
+          message.metadata!['query'] ??
+          message.metadata!['searchParams']?['query'] ??
+          '';
+
+      // If no search query found in metadata, try potential search query first, then last user message
+      if (newSearchQuery?.isEmpty == true) {
+        if (_potentialSearchQuery.isNotEmpty) {
+          newSearchQuery = _potentialSearchQuery;
+          debugPrint('🔍 Using potential search query: $newSearchQuery');
+        } else if (_messages.length >= 2) {
+          // Look for the last user message (the one before this response)
+          for (int i = _messages.length - 2; i >= 0; i--) {
+            if (_messages[i].sender == MessageSender.user) {
+              newSearchQuery = _messages[i].content;
+              break;
+            }
+          }
+        }
+      }
+
+      if (newSearchQuery?.isNotEmpty == true) {
+        _currentSearchQuery = newSearchQuery!;
+      }
+
+      _hasMoreJobs = message.metadata!['hasMore'] ?? false;
+      _totalJobs =
+          message.metadata!['total'] ?? message.metadata!['totalJobs'] ?? 0;
+
+      if (message.metadata!['isFollowUp'] == true) {
+        _currentPage =
+            message.metadata!['currentPage'] ?? message.metadata!['page'] ?? 1;
+      } else {
+        _currentPage = 1;
+      }
+
+      debugPrint(
+          'Job search state: hasMore=$_hasMoreJobs, page=$_currentPage, total=$_totalJobs, query="$_currentSearchQuery"');
+    }
+
+    _isTyping = false;
+  }
+
+  void _handleStreamingMessage(Message message) {
+    // Use backend id for streaming!
+    String streamingId = message.id;
+
+    int index = _messages.indexWhere((m) => m.id == streamingId);
+    if (index != -1) {
+      // Update existing streaming message
+      _messages[index] = message;
+      _currentStreamingMessage = message;
+      notifyListeners();
+    } else {
+      // Add new streaming message
+      _messages.add(message);
+      _currentStreamingMessage = message;
+      notifyListeners();
+    }
+  }
+
+  void _completeStreamingMessage(Message finalMessage) {
+    String streamingId = finalMessage.id;
+    int index = _messages.indexWhere((m) => m.id == streamingId);
+    if (index != -1) {
+      _messages[index] = finalMessage;
+      debugPrint('✅ Completed streaming message: $streamingId');
+    } else {
+      _messages.add(finalMessage);
+      debugPrint('📝 Added final message: ${finalMessage.id}');
+    }
+    _isStreaming = false;
+    _currentStreamingMessage = null;
     notifyListeners();
+  }
+
+  String? _getStreamingMessageId(String? agent) {
+    return _streamingMessageIds[agent ?? 'unknown'];
+  }
+
+  void _addErrorMessage(String errorText) {
+    final message = Message(
+      id: const Uuid().v4(),
+      content: errorText,
+      sender: MessageSender.assistant,
+      type: MessageType.error,
+      timestamp: DateTime.now(),
+    );
+    _messages.add(message);
+    _isTyping = false;
+    notifyListeners();
+  }
+
+  void _sendMessage(Map<String, dynamic> message) {
+    if (_channel != null) {
+      try {
+        final messageStr = json.encode(message);
+        _channel!.sink.add(messageStr);
+        debugPrint('📤 Sent WebSocket message: ${message['event']}');
+      } catch (e) {
+        debugPrint('❌ Error sending WebSocket message: $e');
+      }
+    } else {
+      debugPrint('❌ WebSocket channel not available');
+    }
   }
 
   // Public methods
@@ -488,8 +465,14 @@ class ChatService extends ChangeNotifier {
     _isTyping = true;
     notifyListeners();
 
-    // Send message via socket
-    _socket!.emit('send_message', {'message': content});
+    // Send message via WebSocket
+    final messageData = {
+      "event": "send_message",
+      "data": {
+        "message": content,
+      }
+    };
+    _sendMessage(messageData);
   }
 
   void loadMoreJobs() {
@@ -502,16 +485,21 @@ class ChatService extends ChangeNotifier {
     debugPrint(
         '📄 Loading more jobs for query: $_currentSearchQuery, page: ${_currentPage + 1}');
 
-    _socket!.emit('load_more_jobs', {
-      'page': _currentPage + 1,
-      'searchQuery': _currentSearchQuery,
-    });
+    final messageData = {
+      "event": "load_more_jobs",
+      "data": {
+        "page": _currentPage + 1,
+        "searchQuery": _currentSearchQuery,
+      }
+    };
+    _sendMessage(messageData);
   }
 
   void fetchSessions() {
     if (!_isConnected || !_isAuthenticated) return;
 
-    _socket!.emit('get_user_sessions');
+    final messageData = {"event": "get_user_sessions", "data": {}};
+    _sendMessage(messageData);
   }
 
   void loadSession(String sessionId) {
@@ -522,22 +510,38 @@ class ChatService extends ChangeNotifier {
     }
 
     debugPrint('📂 Loading session: $sessionId');
-    _socket!.emit('load_session', {'sessionId': sessionId});
+    final messageData = {
+      "event": "load_session",
+      "data": {
+        "sessionId": sessionId,
+      }
+    };
+    _sendMessage(messageData);
   }
 
   void deleteSession(String sessionId) {
     if (!_isConnected || !_isAuthenticated) return;
 
-    _socket!.emit('delete_session', {'sessionId': sessionId});
+    final messageData = {
+      "event": "delete_session",
+      "data": {
+        "sessionId": sessionId,
+      }
+    };
+    _sendMessage(messageData);
   }
 
   void updateSessionTitle(String sessionId, String title) {
     if (!_isConnected || !_isAuthenticated) return;
 
-    _socket!.emit('update_session_title', {
-      'sessionId': sessionId,
-      'title': title,
-    });
+    final messageData = {
+      "event": "update_session_title",
+      "data": {
+        "sessionId": sessionId,
+        "title": title,
+      }
+    };
+    _sendMessage(messageData);
   }
 
   void createNewSession() {
@@ -549,7 +553,8 @@ class ChatService extends ChangeNotifier {
     clearCurrentSession();
 
     // Emit create new chat event
-    _socket!.emit('create_new_chat', {});
+    final messageData = {"event": "create_new_chat", "data": {}};
+    _sendMessage(messageData);
 
     // Refresh sessions after a delay
     Future.delayed(const Duration(milliseconds: 1000), () {
@@ -565,6 +570,12 @@ class ChatService extends ChangeNotifier {
     _hasMoreJobs = false;
     _currentPage = 1;
     _totalJobs = 0;
+    notifyListeners();
+  }
+
+  void _clearMessages() {
+    debugPrint('🗑️ Clearing ${_messages.length} messages');
+    _messages.clear();
     notifyListeners();
   }
 
@@ -644,22 +655,22 @@ class ChatService extends ChangeNotifier {
 
   @override
   void dispose() {
-    _socket?.disconnect();
-    _socket?.dispose();
+    _channel?.sink.close();
     super.dispose();
   }
 
   // Reconnection method
   void reconnect() {
-    if (_socket != null && !_isConnected) {
-      _socket!.connect();
+    if (_channel != null && !_isConnected) {
+      _initializeWebSocket();
     }
   }
 
   // Ping method for connection health
   void ping() {
     if (_isConnected && _isAuthenticated) {
-      _socket!.emit('ping');
+      final messageData = {"event": "ping", "data": {}};
+      _sendMessage(messageData);
     }
   }
 
