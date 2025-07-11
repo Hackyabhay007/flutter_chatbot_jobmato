@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:file_picker/file_picker.dart';
 import 'dart:io';
 import '../services/chat_service.dart';
@@ -153,17 +154,26 @@ class UploadPromptCard extends StatelessWidget {
 
   void _handleUpload(BuildContext context) async {
     try {
+      debugPrint('📁 Starting file picker...');
+
       FilePickerResult? result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['pdf', 'doc', 'docx'],
         allowMultiple: false,
+        withData: kIsWeb, // Load data on web, don't on mobile
+        withReadStream: false, // Don't create read stream
       );
+
+      debugPrint('📁 File picker result: ${result?.files.length ?? 0} files');
 
       if (result != null && result.files.isNotEmpty) {
         PlatformFile platformFile = result.files.first;
+        debugPrint(
+            '📁 Selected file: ${platformFile.name}, size: ${platformFile.size}${kIsWeb ? '' : ', path: ${platformFile.path}'}');
 
         // Check file size (10MB limit)
         if (platformFile.size > 10 * 1024 * 1024) {
+          debugPrint('❌ File too large: ${platformFile.size} bytes');
           if (context.mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
@@ -181,16 +191,90 @@ class UploadPromptCard extends StatelessWidget {
           return;
         }
 
-        // Convert PlatformFile to File
-        File file = File(platformFile.path!);
+        debugPrint('✅ File validation passed, proceeding with upload');
 
         // Show loading indicator
         if (context.mounted) {
           _showUploadingDialog(context, platformFile.name);
         }
 
-        // Upload file using chat service
-        bool success = await chatService.uploadResume(file);
+        // Handle file upload based on platform
+        bool success = false;
+        if (kIsWeb) {
+          // Web platform - use bytes
+          debugPrint('🌐 Web platform detected, using bytes for upload');
+          if (platformFile.bytes != null) {
+            debugPrint(
+                '📄 File bytes available: ${platformFile.bytes!.length} bytes');
+            success = await chatService.uploadResumeBytes(
+              platformFile.bytes!,
+              platformFile.name,
+            );
+          } else {
+            debugPrint('❌ File bytes are null on web');
+            if (context.mounted) {
+              Navigator.of(context).pop();
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: const Row(
+                    children: [
+                      Icon(Icons.error, color: Colors.white),
+                      SizedBox(width: 8),
+                      Text('Could not read file data. Please try again.'),
+                    ],
+                  ),
+                  backgroundColor: Colors.red.shade600,
+                ),
+              );
+            }
+            return;
+          }
+        } else {
+          // Mobile platform - use file path
+          debugPrint('📱 Mobile platform detected, using file path for upload');
+          if (platformFile.path == null) {
+            debugPrint('❌ File path is null on mobile');
+            if (context.mounted) {
+              Navigator.of(context).pop();
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: const Row(
+                    children: [
+                      Icon(Icons.error, color: Colors.white),
+                      SizedBox(width: 8),
+                      Text('Could not access file. Please try again.'),
+                    ],
+                  ),
+                  backgroundColor: Colors.red.shade600,
+                ),
+              );
+            }
+            return;
+          }
+
+          File file = File(platformFile.path!);
+          if (!await file.exists()) {
+            debugPrint('❌ File does not exist: ${platformFile.path}');
+            if (context.mounted) {
+              Navigator.of(context).pop();
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: const Row(
+                    children: [
+                      Icon(Icons.error, color: Colors.white),
+                      SizedBox(width: 8),
+                      Text('Selected file not found. Please try again.'),
+                    ],
+                  ),
+                  backgroundColor: Colors.red.shade600,
+                ),
+              );
+            }
+            return;
+          }
+
+          success = await chatService.uploadResume(file);
+        }
 
         // Close loading dialog
         if (context.mounted) {
@@ -234,9 +318,20 @@ class UploadPromptCard extends StatelessWidget {
         }
       }
     } catch (e) {
+      debugPrint('❌ File picker error: $e');
       if (context.mounted) {
         // Close any open dialogs
         Navigator.of(context, rootNavigator: true).pop();
+
+        String errorMessage = 'Failed to select file';
+        if (e.toString().contains('permission')) {
+          errorMessage =
+              'Permission denied. Please allow file access in settings.';
+        } else if (e.toString().contains('cancelled')) {
+          errorMessage = 'File selection was cancelled';
+        } else {
+          errorMessage = 'Failed to select file: ${e.toString()}';
+        }
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -244,10 +339,11 @@ class UploadPromptCard extends StatelessWidget {
               children: [
                 const Icon(Icons.error, color: Colors.white),
                 const SizedBox(width: 8),
-                Text('Failed to upload resume: ${e.toString()}'),
+                Expanded(child: Text(errorMessage)),
               ],
             ),
             backgroundColor: Colors.red.shade600,
+            duration: const Duration(seconds: 4),
           ),
         );
       }

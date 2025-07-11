@@ -3,13 +3,17 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:uuid/uuid.dart';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import '../models/message.dart';
 import '../models/job.dart';
 import 'auth_service.dart';
+import 'package:dio/dio.dart' as dio;
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:http_parser/http_parser.dart';
 
 class ChatService extends ChangeNotifier {
-  static const bool isProduction = true;
+  static const bool isProduction = false;
   static const String baseUrl = isProduction
       ? 'https://chatbotv2.jobmato.com'
       : 'http://127.0.0.1:8000'; // Local development server
@@ -24,6 +28,10 @@ class ChatService extends ChangeNotifier {
       return 'ws://127.0.0.1:8000/ws/chat';
     }
   }
+
+  // Always use production endpoint for resume uploads
+  static const String resumeUploadEndpoint =
+      'https://backend-v1.jobmato.com/api/rag/resume/upload';
 
   WebSocketChannel? _channel;
   final AuthService _authService;
@@ -622,7 +630,7 @@ class ChatService extends ChangeNotifier {
     notifyListeners();
   }
 
-  // File upload method
+  // File upload method for mobile platforms
   Future<bool> uploadResume(File file) async {
     try {
       debugPrint('📄 Starting resume upload: ${file.path}');
@@ -632,7 +640,7 @@ class ChatService extends ChangeNotifier {
 
       // Create multipart request
       var request =
-          http.MultipartRequest('POST', Uri.parse('$baseUrl/upload-resume'));
+          http.MultipartRequest('POST', Uri.parse(resumeUploadEndpoint));
 
       // Add headers
       request.headers['Authorization'] = 'Bearer $token';
@@ -641,17 +649,29 @@ class ChatService extends ChangeNotifier {
       request.fields['session_id'] = _sessionId ?? 'default';
       request.fields['token'] = token;
 
+      // Detect file type
+      String fileName = file.path.split('/').last;
+      String fileType = 'application/pdf';
+      if (fileName.toLowerCase().endsWith('.doc'))
+        fileType = 'application/msword';
+      if (fileName.toLowerCase().endsWith('.docx'))
+        fileType =
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+      request.fields['file_type'] = fileType;
+      request.fields['file_name'] = fileName;
+      request.fields['text_content'] = '';
+
       // Add file
       var multipartFile = await http.MultipartFile.fromPath(
         'resume',
         file.path,
-        filename: file.path.split('/').last,
+        filename: fileName,
       );
       request.files.add(multipartFile);
 
-      debugPrint('📤 Sending upload request to $baseUrl/upload-resume');
+      debugPrint('📤 Sending upload request to $resumeUploadEndpoint');
       debugPrint('📋 Session ID: ${_sessionId ?? 'default'}');
-      debugPrint('📁 File: ${file.path.split('/').last}');
+      debugPrint('📁 File: $fileName');
 
       // Send request
       var response = await request.send();
@@ -673,6 +693,12 @@ class ChatService extends ChangeNotifier {
             sender: MessageSender.assistant,
             type: MessageType.resumeUpload,
             timestamp: DateTime.now(),
+            metadata: {
+              'resume_id': jsonResponse['resume']?['id'],
+              'file_name': jsonResponse['resume']?['file_name'],
+              'parsed_data': jsonResponse['resume']?['parsed_data'],
+              'text_content': jsonResponse['resume']?['text_content'],
+            },
           );
           _messages.add(successMessage);
           notifyListeners();
@@ -688,6 +714,136 @@ class ChatService extends ChangeNotifier {
         _addErrorMessage(
             'Upload failed: Server returned status ${response.statusCode}');
         return false;
+      }
+    } catch (e) {
+      debugPrint('❌ Resume upload error: $e');
+      _addErrorMessage('Upload failed: ${e.toString()}');
+      return false;
+    }
+  }
+
+  // File upload method for web platforms
+  Future<bool> uploadResumeBytes(Uint8List bytes, String fileName) async {
+    try {
+      debugPrint('📄 Starting resume upload (web): $fileName');
+      final token = _authService.token ?? AuthService.defaultToken;
+
+      // Detect file type
+      String fileType = 'application/pdf';
+      if (fileName.toLowerCase().endsWith('.doc'))
+        fileType = 'application/msword';
+      if (fileName.toLowerCase().endsWith('.docx'))
+        fileType =
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
+      if (kIsWeb) {
+        // Use dio for web uploads
+        final formData = dio.FormData.fromMap({
+          'session_id': _sessionId ?? 'default',
+          'token': token,
+          'file_type': fileType,
+          'file_name': fileName,
+          'text_content': '',
+          'resume': await dio.MultipartFile.fromBytes(
+            bytes,
+            filename: fileName,
+            contentType: MediaType.parse(fileType),
+          ),
+        });
+
+        final d = dio.Dio();
+        final response = await d.post(
+          resumeUploadEndpoint,
+          data: formData,
+          options: dio.Options(
+            headers: {
+              'Authorization': 'Bearer $token',
+            },
+          ),
+        );
+
+        debugPrint('📡 Upload response status: ${response.statusCode}');
+        debugPrint('📄 Upload response body: ${response.data}');
+
+        if (response.statusCode == 200 && response.data['success'] == true) {
+          // Add success message to chat
+          final successMessage = Message(
+            id: const Uuid().v4(),
+            content: response.data['message'] ??
+                'Resume uploaded successfully! I can now provide better job recommendations based on your profile.',
+            sender: MessageSender.assistant,
+            type: MessageType.resumeUpload,
+            timestamp: DateTime.now(),
+            metadata: {
+              'resume_id': response.data['resume']?['id'],
+              'file_name': response.data['resume']?['file_name'],
+              'parsed_data': response.data['resume']?['parsed_data'],
+              'text_content': response.data['resume']?['text_content'],
+            },
+          );
+          _messages.add(successMessage);
+          notifyListeners();
+          return true;
+        } else {
+          debugPrint('❌ Upload failed: ${response.data['error']}');
+          _addErrorMessage('Upload failed: ${response.data['error']}');
+          return false;
+        }
+      } else {
+        // Use http.MultipartRequest for non-web platforms
+        var request =
+            http.MultipartRequest('POST', Uri.parse(resumeUploadEndpoint));
+        request.headers['Authorization'] = 'Bearer $token';
+        request.fields['session_id'] = _sessionId ?? 'default';
+        request.fields['token'] = token;
+        request.fields['file_type'] = fileType;
+        request.fields['file_name'] = fileName;
+        request.fields['text_content'] = '';
+        var multipartFile = http.MultipartFile.fromBytes(
+          'resume',
+          bytes,
+          filename: fileName,
+        );
+        request.files.add(multipartFile);
+        debugPrint('📤 Sending upload request to $resumeUploadEndpoint');
+        debugPrint('📋 Session ID: ${_sessionId ?? 'default'}');
+        debugPrint('📁 File: $fileName (${bytes.length} bytes)');
+        var response = await request.send();
+        var responseBody = await response.stream.bytesToString();
+        debugPrint('📡 Upload response status: ${response.statusCode}');
+        debugPrint('📄 Upload response body: $responseBody');
+        if (response.statusCode == 200) {
+          var jsonResponse = json.decode(responseBody);
+          if (jsonResponse['success'] == true) {
+            debugPrint('✅ Resume uploaded successfully');
+            final successMessage = Message(
+              id: const Uuid().v4(),
+              content: jsonResponse['message'] ??
+                  'Resume uploaded successfully! I can now provide better job recommendations based on your profile.',
+              sender: MessageSender.assistant,
+              type: MessageType.resumeUpload,
+              timestamp: DateTime.now(),
+              metadata: {
+                'resume_id': jsonResponse['resume']?['id'],
+                'file_name': jsonResponse['resume']?['file_name'],
+                'parsed_data': jsonResponse['resume']?['parsed_data'],
+                'text_content': jsonResponse['resume']?['text_content'],
+              },
+            );
+            _messages.add(successMessage);
+            notifyListeners();
+            return true;
+          } else {
+            debugPrint('❌ Upload failed: ${jsonResponse['error']}');
+            _addErrorMessage('Upload failed: ${jsonResponse['error']}');
+            return false;
+          }
+        } else {
+          debugPrint('❌ Upload failed with status: ${response.statusCode}');
+          _addErrorMessage(
+              'Upload failed: Server returned status ${response.statusCode}');
+          return false;
+        }
       }
     } catch (e) {
       debugPrint('❌ Resume upload error: $e');

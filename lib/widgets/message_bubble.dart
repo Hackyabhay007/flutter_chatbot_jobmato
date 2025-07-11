@@ -247,6 +247,95 @@ class MessageBubble extends StatelessWidget {
           );
         }
 
+      case MessageType.resumeUploadRequired:
+        // For resume upload required messages, show upload button
+        return Container(
+          width: double.infinity,
+          decoration: BoxDecoration(
+            color: isUser ? Colors.white.withOpacity(0.1) : Colors.grey.shade50,
+            borderRadius: BorderRadius.circular(12),
+            border: isUser ? null : Border.all(color: Colors.grey.shade200),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.upload_file,
+                      color: isUser ? Colors.white : AppTheme.primaryColor,
+                      size: 24,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        message.content,
+                        style: TextStyle(
+                          color: textColor,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                if (chatService != null) ...[
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: () {
+                            // Trigger file picker directly
+                            if (chatService != null) {
+                              chatService!.showUploadPrompt();
+                            }
+                          },
+                          icon: const Icon(Icons.upload_file, size: 20),
+                          label: const Text('Upload Resume'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppTheme.primaryColor,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      TextButton(
+                        onPressed: () {
+                          // Send a message to skip resume upload
+                          chatService!.sendMessage(
+                              'I prefer to skip uploading my resume for now. Please continue with general assistance.');
+                        },
+                        child: Text(
+                          'Skip for now',
+                          style: TextStyle(
+                            color: textColor.withOpacity(0.7),
+                            fontSize: 14,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Supported formats: PDF, DOC, DOCX (Max 10MB)',
+                    style: TextStyle(
+                      color: textColor.withOpacity(0.6),
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        );
+
       case MessageType.markdown:
         // For markdown messages, use markdown rendering even during streaming
         return Container(

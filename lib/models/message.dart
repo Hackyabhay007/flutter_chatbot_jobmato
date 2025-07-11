@@ -4,6 +4,7 @@ enum MessageType {
   text,
   jobCard,
   resumeUpload,
+  resumeUploadRequired,
   error,
   typing,
   uploadPrompt,
@@ -69,6 +70,8 @@ class Message {
         return MessageType.jobCard;
       case 'resume_upload_success':
         return MessageType.resumeUpload;
+      case 'resume_upload_required':
+        return MessageType.resumeUploadRequired;
       case 'upload_prompt':
         return MessageType.uploadPrompt;
       case 'markdown':
