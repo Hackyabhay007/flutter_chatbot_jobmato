@@ -9,10 +9,21 @@ import '../models/job.dart';
 import 'auth_service.dart';
 
 class ChatService extends ChangeNotifier {
-  static const bool isProduction = false;
+  static const bool isProduction = true;
   static const String baseUrl = isProduction
-      ? 'https://chatbot-server.jobmato.com'
+      ? 'https://clownfish-app-bnh85.ondigitalocean.app'
       : 'http://127.0.0.1:8000'; // Local development server
+
+  // WebSocket URL based on environment
+  static String get wsUrl {
+    if (isProduction) {
+      // For production, use secure WebSocket with the same domain
+      return 'wss://clownfish-app-bnh85.ondigitalocean.app/ws/chat';
+    } else {
+      // For development, use local WebSocket
+      return 'ws://127.0.0.1:8000/ws/chat';
+    }
+  }
 
   WebSocketChannel? _channel;
   final AuthService _authService;
@@ -69,8 +80,9 @@ class ChatService extends ChangeNotifier {
           '🔗 Initializing WebSocket with token: ${token?.substring(0, 20)}...');
 
       // Create WebSocket connection
-      final wsUrl = Uri.parse('ws://127.0.0.1:8000/ws/chat');
-      _channel = WebSocketChannel.connect(wsUrl);
+      final wsUri = Uri.parse(wsUrl);
+      debugPrint('🔗 Connecting to WebSocket: $wsUrl');
+      _channel = WebSocketChannel.connect(wsUri);
 
       _setupWebSocketListeners();
     } catch (e) {
