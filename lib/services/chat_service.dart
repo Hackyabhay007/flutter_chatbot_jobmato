@@ -11,14 +11,14 @@ import 'auth_service.dart';
 class ChatService extends ChangeNotifier {
   static const bool isProduction = true;
   static const String baseUrl = isProduction
-      ? 'https://clownfish-app-bnh85.ondigitalocean.app'
+      ? 'https://chatbotv2.jobmato.com'
       : 'http://127.0.0.1:8000'; // Local development server
 
   // WebSocket URL based on environment
   static String get wsUrl {
     if (isProduction) {
       // For production, use secure WebSocket with the same domain
-      return 'wss://clownfish-app-bnh85.ondigitalocean.app/ws/chat';
+      return 'wss://chatbotv2.jobmato.com/ws/chat';
     } else {
       // For development, use local WebSocket
       return 'ws://127.0.0.1:8000/ws/chat';
@@ -197,6 +197,11 @@ class ChatService extends ChangeNotifier {
       _isConnected = true;
       _userId = payload['username'];
       debugPrint('✅ Authentication successful');
+
+      // Fetch sessions after successful authentication
+      Future.delayed(const Duration(milliseconds: 500), () {
+        fetchSessions();
+      });
     } else {
       _isAuthenticated = false;
       debugPrint('❌ Authentication failed: ${payload['message']}');
@@ -446,6 +451,22 @@ class ChatService extends ChangeNotifier {
       return;
     }
 
+    // If no session exists and this is the first message, create a new session
+    if (_sessionId == null && _messages.isEmpty) {
+      debugPrint('🆕 Auto-creating new session for first message');
+      createNewSession(clearMessages: false);
+
+      // Wait a bit for session creation, then send the message
+      Future.delayed(const Duration(milliseconds: 500), () {
+        _sendMessageInternal(content);
+      });
+      return;
+    }
+
+    _sendMessageInternal(content);
+  }
+
+  void _sendMessageInternal(String content) {
     // Store potential search query (if this looks like a job search)
     String trimmedContent = content.trim().toLowerCase();
     if (trimmedContent.contains('job') ||
@@ -556,13 +577,23 @@ class ChatService extends ChangeNotifier {
     _sendMessage(messageData);
   }
 
-  void createNewSession() {
+  void createNewSession({bool clearMessages = true}) {
     if (!_isConnected || !_isAuthenticated) return;
 
     debugPrint('🆕 Creating new chat session...');
 
-    // Clear current session state
-    clearCurrentSession();
+    // Clear current session state only if requested
+    if (clearMessages) {
+      clearCurrentSession();
+    } else {
+      // Just reset session ID and other state, but keep messages
+      _sessionId = null;
+      _currentSearchQuery = '';
+      _potentialSearchQuery = '';
+      _hasMoreJobs = false;
+      _currentPage = 1;
+      _totalJobs = 0;
+    }
 
     // Emit create new chat event
     final messageData = {"event": "create_new_chat", "data": {}};
